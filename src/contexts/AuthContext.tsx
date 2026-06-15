@@ -1,8 +1,8 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from 'react'
 import {
   onAuthStateChanged,
-  signInWithEmailAndPassword,
-  createUserWithEmailAndPassword,
+  signInWithPopup,
+  GoogleAuthProvider,
   signOut,
   User,
 } from 'firebase/auth'
@@ -13,8 +13,9 @@ interface AuthContextType {
   currentUser: User | null
   userRole: 'teacher' | 'student' | null
   loading: boolean
-  login: (email: string, password: string) => Promise<void>
-  signup: (email: string, password: string, role: 'teacher' | 'student') => Promise<void>
+  needsRoleSelection: boolean
+  loginWithGoogle: () => Promise<void>
+  selectRole: (role: 'teacher' | 'student') => Promise<void>
   logout: () => Promise<void>
 }
 
@@ -30,28 +31,39 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [currentUser, setCurrentUser] = useState<User | null>(null)
   const [userRole, setUserRole] = useState<'teacher' | 'student' | null>(null)
   const [loading, setLoading] = useState(true)
+  const [needsRoleSelection, setNeedsRoleSelection] = useState(false)
 
-  async function login(email: string, password: string) {
-    const cred = await signInWithEmailAndPassword(auth, email, password)
+  async function loginWithGoogle() {
+    const provider = new GoogleAuthProvider()
+    const cred = await signInWithPopup(auth, provider)
     const userDoc = await getDoc(doc(db, 'users', cred.user.uid))
+
     if (userDoc.exists()) {
       setUserRole(userDoc.data().role)
+      setNeedsRoleSelection(false)
+    } else {
+      // 첫 로그인: 역할 선택 필요
+      setNeedsRoleSelection(true)
     }
   }
 
-  async function signup(email: string, password: string, role: 'teacher' | 'student') {
-    const cred = await createUserWithEmailAndPassword(auth, email, password)
-    await setDoc(doc(db, 'users', cred.user.uid), {
-      email,
+  async function selectRole(role: 'teacher' | 'student') {
+    if (!currentUser) return
+    await setDoc(doc(db, 'users', currentUser.uid), {
+      email: currentUser.email,
+      displayName: currentUser.displayName,
+      photoURL: currentUser.photoURL,
       role,
       createdAt: new Date().toISOString(),
     })
     setUserRole(role)
+    setNeedsRoleSelection(false)
   }
 
   async function logout() {
     await signOut(auth)
     setUserRole(null)
+    setNeedsRoleSelection(false)
   }
 
   useEffect(() => {
@@ -61,9 +73,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const userDoc = await getDoc(doc(db, 'users', user.uid))
         if (userDoc.exists()) {
           setUserRole(userDoc.data().role)
+          setNeedsRoleSelection(false)
+        } else {
+          setNeedsRoleSelection(true)
         }
       } else {
         setUserRole(null)
+        setNeedsRoleSelection(false)
       }
       setLoading(false)
     })
@@ -74,8 +90,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     currentUser,
     userRole,
     loading,
-    login,
-    signup,
+    needsRoleSelection,
+    loginWithGoogle,
+    selectRole,
     logout,
   }
 
